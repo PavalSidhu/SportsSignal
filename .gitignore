@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+frontend/dist/
+.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Models
+backend/models/
+
+# Logs
+*.log
+
+# Portfolio: skip non-essential files
+backend/alembic/
+backend/alembic.ini
+backend/Dockerfile
+backend/tests/
+backend/app/scripts/
+docs/
+.env.example
+frontend/package-lock.json
+frontend/public/
+frontend/src/assets/
+frontend/eslint.config.js
