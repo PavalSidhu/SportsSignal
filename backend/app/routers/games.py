@@ -30,7 +30,7 @@ async def list_games(
     date: str | None = Query(None),
     status: str | None = Query(None),
     team_id: int | None = Query(None),
-    limit: int = Query(50, le=100),
+    limit: int = Query(100, le=200),
     offset: int = Query(0),
     tz_offset: float = Query(-5, description="User's UTC offset in hours (e.g. -8 for Pacific)"),
     db: AsyncSession = Depends(get_db),
