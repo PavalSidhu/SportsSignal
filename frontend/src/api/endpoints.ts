@@ -22,7 +22,7 @@ export function fetchGames(params: {
   search.set('sport', params.sport);
   if (params.date) search.set('date', params.date);
   if (params.status) search.set('status', params.status);
-  if (params.limit) search.set('limit', String(params.limit));
+  search.set('limit', String(params.limit ?? 200));
   if (params.offset) search.set('offset', String(params.offset));
   const tzOffset = -(new Date().getTimezoneOffset() / 60);
   search.set('tz_offset', String(tzOffset));

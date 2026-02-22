@@ -1,5 +1,4 @@
 import logging
-from datetime import timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,9 +52,8 @@ SPORT_FEATURE_REGISTRY: dict[str, list[str]] = {
 }
 
 # Base feature names shared across all sports
-# Removed: home_advantage (always 1.0, zero importance),
-#          is_back_to_back_home/away (redundant with rest_days),
-#          is_postseason (near-zero importance across all sports)
+# Removed dead features: home_advantage (always 1.0), is_back_to_back_home/away,
+# is_postseason, rest_days_home/away (all zero importance in trained models)
 BASE_FEATURE_NAMES: list[str] = [
     "elo_diff",
     "home_win_pct_10",
@@ -64,8 +62,6 @@ BASE_FEATURE_NAMES: list[str] = [
     "away_ppg_20",
     "home_papg_20",
     "away_papg_20",
-    "rest_days_home",
-    "rest_days_away",
     "h2h_home_wins_last5",
     "home_streak",
     "away_streak",
@@ -101,8 +97,6 @@ class FeatureEngineer:
                 "away_ppg",
                 "home_papg",
                 "away_papg",
-                "rest_days_home",
-                "rest_days_away",
                 "h2h_home_wins_last5",
             ]
 
@@ -137,10 +131,6 @@ class FeatureEngineer:
         hs = home_stats.stats
         as_ = away_stats.stats
 
-        # Rest days: compute from rolling stats as_of_date
-        rest_days_home = self._calc_rest_days_from_dates(game.game_date, home_stats.as_of_date)
-        rest_days_away = self._calc_rest_days_from_dates(game.game_date, away_stats.as_of_date)
-
         # H2H record — still need a query for this
         h2h_games = await self._get_h2h_games(
             game.home_team_id, game.away_team_id, 5, game.game_date
@@ -161,8 +151,6 @@ class FeatureEngineer:
             "away_ppg_20": as_.get("ppg_20", 0.0),
             "home_papg_20": hs.get("papg_20", 0.0),
             "away_papg_20": as_.get("papg_20", 0.0),
-            "rest_days_home": rest_days_home,
-            "rest_days_away": rest_days_away,
             "h2h_home_wins_last5": h2h_home_wins_last5,
             "home_streak": float(hs.get("streak", 0)),
             "away_streak": float(as_.get("streak", 0)),
@@ -217,15 +205,6 @@ class FeatureEngineer:
         )
         return result.scalars().first()
 
-    @staticmethod
-    def _calc_rest_days_from_dates(game_date, last_game_date) -> float:
-        """Calculate rest days between two dates. Capped at 7."""
-        if last_game_date is None:
-            return 3.0
-        delta = game_date - last_game_date
-        rest = delta.days if isinstance(delta, timedelta) else delta.total_seconds() / 86400
-        return min(rest, 7.0)
-
     # --- Legacy feature computation (fallback) ---
 
     async def _compute_features_legacy(self, game: Game) -> dict | None:
@@ -264,9 +243,6 @@ class FeatureEngineer:
         away_ppg = self._calc_ppg(game.away_team_id, away_last_20, default_ppg)
         home_papg = self._calc_papg(game.home_team_id, home_last_20, default_ppg)
         away_papg = self._calc_papg(game.away_team_id, away_last_20, default_ppg)
-        rest_days_home = self._calc_rest_days(game.game_date, home_last_10)
-        rest_days_away = self._calc_rest_days(game.game_date, away_last_10)
-
         h2h_games = await self._get_h2h_games(
             game.home_team_id, game.away_team_id, 5, game.game_date
         )
@@ -288,8 +264,6 @@ class FeatureEngineer:
                 "away_ppg_20": away_ppg,
                 "home_papg_20": home_papg,
                 "away_papg_20": away_papg,
-                "rest_days_home": rest_days_home,
-                "rest_days_away": rest_days_away,
                 "h2h_home_wins_last5": h2h_home_wins_last5,
                 "home_streak": 0.0,
                 "away_streak": 0.0,
@@ -308,8 +282,6 @@ class FeatureEngineer:
             "away_ppg": away_ppg,
             "home_papg": home_papg,
             "away_papg": away_papg,
-            "rest_days_home": rest_days_home,
-            "rest_days_away": rest_days_away,
             "h2h_home_wins_last5": h2h_home_wins_last5,
         }
 
@@ -391,11 +363,3 @@ class FeatureEngineer:
                 total += g.home_score or 0
         return total / len(games)
 
-    @staticmethod
-    def _calc_rest_days(game_date, games: list[Game]) -> float:
-        if not games:
-            return 3.0
-        most_recent = games[0]
-        delta = game_date - most_recent.game_date
-        rest = delta.days if isinstance(delta, timedelta) else delta.total_seconds() / 86400
-        return min(rest, 7.0)

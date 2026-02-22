@@ -52,6 +52,7 @@ DEFAULT_LGBM_PARAMS: dict[str, dict] = {
         "colsample_bytree": 0.8,
         "reg_alpha": 0.1,
         "reg_lambda": 1.0,
+        "is_unbalance": True,
         "random_state": 42,
         "verbose": -1,
     },
@@ -65,6 +66,7 @@ DEFAULT_LGBM_PARAMS: dict[str, dict] = {
         "colsample_bytree": 0.8,
         "reg_alpha": 0.1,
         "reg_lambda": 1.0,
+        "is_unbalance": True,
         "random_state": 42,
         "verbose": -1,
     },
@@ -78,6 +80,7 @@ DEFAULT_LGBM_PARAMS: dict[str, dict] = {
         "colsample_bytree": 0.7,
         "reg_alpha": 1.0,
         "reg_lambda": 5.0,
+        "is_unbalance": True,
         "random_state": 42,
         "verbose": -1,
     },
@@ -91,6 +94,7 @@ DEFAULT_LGBM_PARAMS: dict[str, dict] = {
         "colsample_bytree": 0.7,
         "reg_alpha": 1.0,
         "reg_lambda": 5.0,
+        "is_unbalance": True,
         "random_state": 42,
         "verbose": -1,
     },
@@ -104,6 +108,7 @@ DEFAULT_LGBM_PARAMS: dict[str, dict] = {
         "colsample_bytree": 0.6,
         "reg_alpha": 2.0,
         "reg_lambda": 10.0,
+        "is_unbalance": True,
         "random_state": 42,
         "verbose": -1,
     },
@@ -117,6 +122,7 @@ DEFAULT_LGBM_PARAMS: dict[str, dict] = {
         "colsample_bytree": 0.7,
         "reg_alpha": 1.0,
         "reg_lambda": 5.0,
+        "is_unbalance": True,
         "random_state": 42,
         "verbose": -1,
     },
@@ -190,9 +196,16 @@ class ModelTrainer:
         y_away_score = np.array(y_away_score_list)
 
         logger.info(
-            "Training on %d games with %d features for sport=%s",
+            "Collected %d games with %d features for sport=%s",
             len(X_list), X.shape[1], sport,
         )
+
+        # Symmetric augmentation: add away-perspective mirror of each game
+        # to eliminate inherent home bias in the model intercept
+        X, y_win, y_home_score, y_away_score = self._augment_symmetric(
+            X, y_win, y_home_score, y_away_score, fe.FEATURE_NAMES,
+        )
+        logger.info("After symmetric augmentation: %d samples", len(X))
 
         tscv = TimeSeriesSplit(n_splits=5)
         use_lgbm = use_lightgbm and HAS_LIGHTGBM
@@ -269,10 +282,10 @@ class ModelTrainer:
         )
         calibrated_model.fit(X, y_win)
 
-        # Score models: LGBMRegressor
+        # Score models: LGBMRegressor (filter out classifier-only params)
         score_params = {
             k: v for k, v in best_params.items()
-            if k not in ("verbose",)
+            if k not in ("verbose", "is_unbalance")
         }
         score_params["verbose"] = -1
 
@@ -441,6 +454,42 @@ class ModelTrainer:
         }
 
     @staticmethod
+    def _augment_symmetric(
+        X: np.ndarray,
+        y_win: np.ndarray,
+        y_home_score: np.ndarray,
+        y_away_score: np.ndarray,
+        feature_names: list[str],
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Double training data by adding away-perspective mirror of each game.
+
+        For each sample, creates a flipped version where home/away features are
+        swapped and the label is inverted. This teaches the model that the same
+        matchup from the other side should give complementary probabilities,
+        eliminating inherent home bias in the model intercept.
+        """
+        X_flip = np.copy(X)
+
+        for i, name in enumerate(feature_names):
+            if name == "elo_diff":
+                X_flip[:, i] = -X[:, i]
+            elif name == "h2h_home_wins_last5":
+                X_flip[:, i] = 1.0 - X[:, i]
+            elif name.startswith("home_"):
+                away_name = "away_" + name[5:]
+                if away_name in feature_names:
+                    j = feature_names.index(away_name)
+                    X_flip[:, i] = X[:, j]
+                    X_flip[:, j] = X[:, i]
+
+        return (
+            np.concatenate([X, X_flip]),
+            np.concatenate([y_win, 1 - y_win]),
+            np.concatenate([y_home_score, y_away_score]),
+            np.concatenate([y_away_score, y_home_score]),
+        )
+
+    @staticmethod
     def _tune_hyperparams(X: np.ndarray, y: np.ndarray, tscv) -> dict:
         """Run Optuna hyperparameter search for LightGBM."""
         def objective(trial):
@@ -454,6 +503,7 @@ class ModelTrainer:
                 "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
                 "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 10.0, log=True),
                 "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True),
+                "is_unbalance": True,
                 "random_state": 42,
                 "verbose": -1,
             }
